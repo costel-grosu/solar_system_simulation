@@ -9,6 +9,7 @@
 #define INLINE __attribute__((always_inline))
 #else
 #define INLINE inline
+
 #endif
 #endif
 
@@ -60,5 +61,7 @@ struct vector3{
 
 typedef vector3<double> dvec3;
 typedef vector3<float>  fvec3;
+
+#undef INLINE
 
 #endif //  __VECTOR3_H

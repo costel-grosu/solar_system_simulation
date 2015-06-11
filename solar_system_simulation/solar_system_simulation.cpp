@@ -7,6 +7,10 @@
 #include <cmath>
 #include "vector3.h"
 
+#define now __rdtsc
+
+#define NOINLINE __declspec(noinline)
+#define INLINE __declspec(inline)
 
 #define FLOAT double
 #define V3 dvec3
@@ -15,11 +19,14 @@
 
 struct Body {
     V3 x, v, a;
+    V3 jerk;
+
     FLOAT Gm;
     FLOAT t;
 
     // Predicted values
-    V3 xp, vp;
+    V3 xp, vp, ap;
+    V3 jerkp;
     FLOAT tp;
 
     // acceleration of m1 towards mg
@@ -32,6 +39,27 @@ struct Body {
         V3 A = (Gm2 / r2) * (r * rabs);
         return A;
     };
+
+
+    // Hermite 4th order predictor
+    void Predictor4(FLOAT dt) {
+        const double dt2 = (1. / 2.) * dt;
+        const double dt3 = (1. / 3.) * dt;
+        xp = x + dt * (v + dt2 * (a + dt3 * jerk));
+        vp = v + dt * (a + dt2 * jerk);
+    };
+
+
+    void Corrector4(FLOAT dt) {
+        const double h = dt / 2;
+        const double h2 = - h / 3;
+        V3 vc = v + h*((ap + a) + h2 * (jerkp - jerk));
+        x = x + h*((vc + v) + h2 * (ap - a));
+        a = ap;
+        jerk = jerkp;
+        t = tp;
+    }
+
 
 };
 
@@ -135,6 +163,20 @@ public:
     }
 
 
+
+    void Predict(FLOAT dt) {
+        const FLOAT dt2 = (1. / 2.) * dt;
+        const FLOAT dt3 = (1. / 3.) * dt;
+        int i;
+        for (i = 0; i < NBody; i++) {
+
+        }
+       // xp = x + dt * (p.vel + dt2 * (p.acc + dt3 * p.jrk));
+       // vel = p.vel + dt * (p.acc + dt2 * (p.jrk));
+    }
+
+
+
     void integrate(FLOAT dt) {
         int i, j;
 
@@ -177,10 +219,315 @@ public:
 };
 
 
+class Integrators {
+public:
+    V3 pos, vel;
+    double mass;
+    double e0;
+    
+    typedef void(Integrators::*integrate_func)(double dt);
+
+    void init(double mass_, V3 pos_, V3 vel_) {
+        mass = mass_;
+        pos = pos_;
+        vel = vel_;
+        InitEnergy();
+    };
+
+    NOINLINE void evolve(double dt, double dt_dia, double dt_out, double dt_end, integrate_func integrate) {
+        double time = 0;
+        int nsteps = 0;
+        double t_dia = dt_dia - dt / 2;
+        double t_out = dt_out - dt / 2;
+        double t_end = dt_end - dt / 2;
+        
+        __int64 t0 = now();
+        while (time < t_end) {
+            (this->*integrate)(dt);
+            time += dt;
+            nsteps++;
+        }
+        __int64 t1 = now();
+        printf("ticks per loop:%ld\n", (int)((t1 - t0) / nsteps));
+        Diagnostics(nsteps, time, dt);
+    };
+
+    V3 acc() {
+        double r2 = pos * pos;
+        double r3 = r2 * sqrt(r2);
+        return pos * (-mass / r3);
+    }
+
+    V3 jerk() {
+        double r2 = pos * pos;
+        double r3 = r2 * sqrt(r2);
+        return (vel + pos * (-3 * (pos * vel)/r2)) * (-mass / r3);
+    }
+
+    // 90 ticks. this is an optimized version of leapfrog()
+    void leapfrog2(double dt) {
+        double r2, r3, f, ax, ay, az, dt2;
+        double x = pos.x;
+        double y = pos.y;
+        double z = pos.z;
+        double vx = vel.x;
+        double vy = vel.y;
+        double vz = vel.z;
+        dt2 = 0.5 * dt;
+
+        //acc
+        r2 = x * x + y * y + z * z;
+        r3 = r2 * sqrt(r2);
+        f = - mass / r3;
+        ax = x * f;
+        ay = y * f;
+        az = z * f;
+
+        vx += ax * dt2;
+        vy += ay * dt2;
+        vz += az * dt2;
+        
+        x += vx * dt;
+        y += vy * dt;
+        z += vz * dt;
+
+        //acc
+        r2 = x * x + y * y + z * z;
+        r3 = r2 * sqrt(r2);
+        f = - mass / r3;
+        ax = x * f;
+        ay = y * f;
+        az = z * f;
+
+        vx += ax * dt2;
+        vy += ay * dt2;
+        vz += az * dt2;
+
+        pos.x = x;
+        pos.y = y;
+        pos.z = z;
+        vel.x = vx;
+        vel.y = vy;
+        vel.z = vz;
+    }
+
+    void forward(double dt) {
+        V3 old_acc = acc();
+        pos += vel * dt;
+        vel += old_acc * dt;
+    }
+
+    // 160 ticks
+    void leapfrog(double dt) {
+        vel += acc() * ( dt * 0.5);
+        pos += vel * dt;
+        vel += acc() * (dt * 0.5);
+    }
+
+    void leapfrog1(double dt) {
+        vel += acc() * (dt * 0.5);
+        pos += vel * dt;
+        vel += acc() * (dt * 0.5);
+    }
+
+    void hermitefast(double dt) {
+
+        double r2, r3, f, ax, ay, az, jx, jy, jz, dt2, dt3, rv2;
+        double oldx, oldy, oldz, oldvx, oldvy, oldvz;
+        double oldax, olday, oldaz, oldjx, oldjy, oldjz;
+
+        double x = pos.x;
+        double y = pos.y;
+        double z = pos.z;
+        double vx = vel.x;
+        double vy = vel.y;
+        double vz = vel.z;
+
+        //acc
+        r2 = x * x + y * y + z * z;
+        r3 = r2 * sqrt(r2);
+        f = -mass / r3;
+        ax = x * f;
+        ay = y * f;
+        az = z * f;
+
+        // jer (vel + pos * (-3 * (pos * vel)/r2)) * (-mass / r3);
+        rv2 = x * vx + y * vy + z * vz;
+        jx = (vx + x * (-3 * rv2 / r2)) * f;
+        jy = (vy + y * (-3 * rv2 / r2)) * f;
+        jz = (vz + z * (-3 * rv2 / r2)) * f;
+
+        oldx = x;
+        oldy = y;
+        oldz = z;
+        oldvx = vx;
+        oldvy = vy;
+        oldvz = vz;
+        oldax = ax;
+        olday = ay;
+        oldaz = az;
+        oldjx = jx;
+        oldjy = jy;
+        oldjz = jz;
+
+        dt2 = dt * dt;
+        dt3 = dt2 * dt;
+
+        x += vx * dt + ax * (dt2 / 2) + jx * (dt3 / 6);
+        y += vy * dt + ay * (dt2 / 2) + jy * (dt3 / 6);
+        z += vz * dt + az * (dt2 / 2) + jz * (dt3 / 6);
+
+        vx += ax * dt + jx * (dt2 / 2);
+        vy += ay * dt + jy * (dt2 / 2);
+        vz += az * dt + jz * (dt2 / 2);
+
+        //acc
+        r2 = x * x + y * y + z * z;
+        r3 = r2 * sqrt(r2);
+        f = -mass / r3;
+        ax = x * f;
+        ay = y * f;
+        az = z * f;
+
+        // jerk (vel + pos * (-3 * (pos * vel)/r2)) * (-mass / r3);
+        rv2 = x * vx + y * vy + z * vz;
+        jx = (vx + x * (-3 * rv2 / r2)) * f;
+        jy = (vy + y * (-3 * rv2 / r2)) * f;
+        jz = (vz + z * (-3 * rv2 / r2)) * f;
+
+        vx = oldvx + (oldax + ax) * (dt / 2) + (oldjx - jx) * (dt2 / 12);
+        vy = oldvy + (olday + ay) * (dt / 2) + (oldjy - jy) * (dt2 / 12);
+        vz = oldvz + (oldaz + az) * (dt / 2) + (oldjz - jz) * (dt2 / 12);
+
+        x = oldx + (oldvx + vx) *(dt / 2) + (oldax - ax) * (dt2 / 12);
+        y = oldy + (oldvy + vy) *(dt / 2) + (olday - ay) * (dt2 / 12);
+        z = oldz + (oldvz + vz) *(dt / 2) + (oldaz - az) * (dt2 / 12);
+
+        pos.x = x;
+        pos.y = y;
+        pos.z = z;
+        vel.x = vx;
+        vel.y = vy;
+        vel.z = vz;
+    }
+
+    void hermite(double dt) {
+        V3 old_pos = pos;
+        V3 old_vel = vel;
+        V3 old_acc = acc();
+        V3 old_jerk = jerk();
+        double dt2 = dt * dt;
+        pos += vel * dt + old_acc * (dt2 / 2) + old_jerk * (dt2 * dt / 6);
+        vel += old_acc*dt + old_jerk * (dt2 / 2);
+        V3 new_acc = acc();
+        V3 new_jerk = jerk();
+        vel = old_vel + (old_acc + new_acc) * (dt / 2) + (old_jerk - new_jerk) * (dt2 / 12);
+        pos = old_pos + (old_vel + vel) * (dt / 2) + (old_acc - new_acc) * (dt2 / 12);
+    }
+
+    void rk2(double dt) {
+        V3 old_pos = pos;
+        V3 h_vel = vel + acc() * (0.5 * dt);
+        pos += vel * (0.5 * dt);
+        vel += acc() * dt;
+        pos = old_pos + h_vel * dt;
+    }
+
+    void rk4(double dt) {
+        double dt2 = dt * dt;
+        V3 old_pos = pos;
+        V3 a0 = acc();
+        pos = old_pos + vel * (dt * 0.5) + a0 * 0.125 * dt2;
+        V3 a1 = acc();
+        pos = old_pos + vel * dt + a1 * 0.5 * dt2;
+        V3 a2 = acc();
+        pos = old_pos + vel * dt + (a0 + a1 * 2) * (1/6.0) * dt2;
+        vel = vel + (a0 + a1 * 4 + a2) * (1 / 6.0) * dt;
+    }
+
+    double KineticEnergy() {
+        return vel*vel  * (1.0 / 2);
+    }
+
+    double PotentialEnergy() {
+        return -mass / sqrt(pos * pos);
+    }
+
+    void InitEnergy() {
+        e0 = KineticEnergy() + PotentialEnergy();
+    }
+
+    void Diagnostics(int nsteps, double time, double dt) {
+        double etot = KineticEnergy() + PotentialEnergy();
+        printf("at time %g after %d steps dt=%g: \nEtot=%g delta_rel=%g\n",
+            time, nsteps, dt, etot, (etot - e0) / e0);
+    }
+
+    static void test() {
+        Integrators b;
+        b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+        printf("e0 = %g\n", b.e0);
+        double min_dt = 0.000001;
+
+#if 1
+        printf("Forward:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::forward);
+        }
+
+        printf("Leapfrog:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::leapfrog);
+        }
+
+        printf("Leapfrog2:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::leapfrog2);
+        }
+#endif
+
+
+        printf("Hermite:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::hermite);
+        }
+
+        printf("hermitefast:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::hermitefast);
+        }
+
+
+#if 1
+        printf("RK2:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::rk2);
+        }
+
+        printf("RK4:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::rk4);
+        }
+#endif
+
+    }
+
+};
+
+
+
 
 
 int _tmain(int argc, _TCHAR* argv[])
 {
+#if 0
     SolarSystem ss;
     ss.init();
 
@@ -206,6 +553,16 @@ int _tmain(int argc, _TCHAR* argv[])
     mercury.v = V3(1.1640059959070938016e-002, -1.7964875644231269124e-002, -1.0817311005210173814e-002);
     mercury.t = 2440800.50;
     printf("mercury dx=(%g %g %g)\n", mercury.x.x - ss.planets[1].x.x, mercury.x.y - ss.planets[1].x.y, mercury.x.z - ss.planets[1].x.z);
+
+    scanf_s("%g", t);
+#endif
+
+
+    Integrators::test();
+
+
+    printf("Press a key to close.");
+    getchar();
 
 	return 0;
 }

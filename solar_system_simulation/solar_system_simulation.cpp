@@ -193,7 +193,7 @@ public:
             pi->a = ai;
             
             //integration step:
-            pi->xp = pi->x + pi->v * dt + pi->a * dt * dt / 2;
+            pi->xp = pi->x + pi->v * dt; // +pi->a * dt * dt / 2;
             pi->vp = pi->v + pi->a * dt;
             pi->tp = pi->t + dt;
         }
@@ -219,12 +219,188 @@ public:
 };
 
 
+
+class System {
+public:
+    static const int NBody = 10;
+    V3 x[NBody], v[NBody], a[NBody], jerk[NBody];
+    V3 xp[NBody], vp[NBody], ap[NBody], jp[NBody];
+    double m[NBody];
+
+    void init() {
+        //init with JPL data
+        //2440400.50 JD0 Julian date of initial state vector
+        const FLOAT T0 = 2440400.50;
+
+        /* Sun */
+        int i = 0;
+        x[i] = V3(4.5144118714356666407e-003, 7.2282841152065867346e-004, 2.4659100492567986271e-004);
+        v[i] = V3(-2.8369446340813151639e-007, 5.1811944086463255444e-006, 2.2306588340621263489e-006);
+        m[i] = 2.95912208285591102582E-4;
+
+        /* Mercury */
+        i = 1;
+        x[i] = V3(3.6030663368975339466e-001, -9.4812876741771684223e-002, -8.7466840117233140436e-002);
+        v[i] = V3(3.7085069798210382186e-003, 2.4854958767430945324e-002, 1.2929109014677844626e-002);
+        m[i] = 4.91254745145081175785E-11;
+
+        /* Venus */
+        i = 2;
+        x[i] = V3(6.0786466491731583464e-001, -3.5518362463675619232e-001, -1.9824142909855515515e-001);
+        v[i] = V3(1.1156645711264016669e-002, 1.5494075513638794325e-002, 6.2773904546696609267e-003);
+        m[i] = 7.24345620963276523095E-10;
+
+        /* EMB */
+        i = 3;
+        x[i] = V3(1.0820747754938311664e-001, -9.2711110739430602933e-001, -4.0209347855944090112e-001);
+        v[i] = V3(1.6833251020051496668e-002, 1.5602036176919105255e-003, 6.7646174015847273137e-004);
+        m[i] = 8.88769273403302327042E-10;
+
+        /* Mars */
+        i = 4;
+        x[i] = V3(-1.2796408611369531836e-001, -1.3262618005333617013e+000, -6.0530808652523961512e-001);
+        v[i] = V3(1.4481919298277924969e-002, 8.0528538390447499843e-005, -3.5188931029397090065e-004);
+        m[i] = 9.54952894222405763492E-11;
+
+        /* Jupiter */
+        i = 5;
+        x[i] = V3(-5.3896824544609061333e+000, -7.7026549518616593034e-001, -1.9866431165907522014e-001);
+        v[i] = V3(1.0053452569924098185e-003, -6.5298425191689416643e-003, -2.8258787532429609536e-003);
+        m[i] = 2.82534210344592625472E-7;
+
+        /* Saturn */
+        i = 6;
+        x[i] = V3(7.9527768530257360864e+000, 4.5078822184006553686e+000, 1.5201955253183338898e+000);
+        v[i] = V3(-3.1594662504012930114e-003, 4.3714634278372622354e-003, 1.9441395169137103763e-003);
+        m[i] = 8.45946850483065929285E-8;
+
+        /* Uranus */
+        i = 7;
+        x[i] = V3(-1.8278236586353147533e+001, -9.5764572881482056433e-001, -1.6132190397271035415e-001);
+        v[i] = V3(1.7108310564806817248e-004, -3.7646704682815900043e-003, -1.6519678610257000136e-003);
+        m[i] = 1.28881623813803488851E-8;
+
+        /* Neptune */
+        i = 8;
+        x[i] = V3(-1.6367191358770888335e+001, -2.3760896725373076342e+001, -9.3213866179497290101e+000);
+        v[i] = V3(2.6225242764289213785e-003, -1.5277473123858904045e-003, -6.9183197562182804864e-004);
+        m[i] = 1.53211248128427618918E-8;
+
+        /* Pluto */
+        i = 9;
+        x[i] = V3(-3.0447680255169362534e+001, -5.3177934960261367037e-001, 9.0596584886274922101e+000);
+        v[i] = V3(2.8177758090360373050e-004, -3.1469590804946202045e-003, -1.0794238049289112837e-003);
+        m[i] = 2.27624775186369921644E-12;
+
+    }
+
+    // given x, v calculate a, jerk
+    void updateForces(V3* x, V3* v, V3* a, V3* jerk) {
+        int i, j;
+        V3 dx, dv, da, dj;
+        double r2, r3;
+        for (i = 0; i < NBody; i++) {
+            a[i] = V3(0, 0, 0);
+            jerk[i] = V3(0, 0, 0);
+        }
+
+        for (i = 0; i < NBody; i++)
+            for (j = i+1; j < NBody; j++) {
+                dx = x[i] - x[j];
+                dv = v[i] - v[j];
+                r2 = dx * dx;
+                r3 = r2 * sqrt(r2);
+                dj = (dv + dx * (-3 * (dx * dv) / r2));
+
+                a[i] -= dx * (m[j] / r3); 
+                a[j] += da * (m[i] / r3);
+                jerk[i] -= dj * (m[j] / r3);
+                jerk[j] += dj * (m[i] / r3);
+            }
+    }
+
+
+    void integrate(double dt) {
+        int i, j;
+        double dt2 = dt * dt;
+
+        updateForces(x, v, a, jerk);
+
+        //prediction
+        for (i = 0; i < NBody; i++) {
+            xp[i] = x[i] + v[i] * dt + a[i] * (dt2 / 2) + jerk[i] * (dt2 * dt / 6);
+            vp[i] = v[i] + a[i] * dt + jerk[i] * (dt2 / 2);
+        }
+        updateForces(xp, vp, ap, jp);
+
+        // correction
+        for (i = 0; i < NBody; i++) {
+            V3 oldv = v[i];
+            v[i] = v[i] + (a[i] + ap[i]) * (dt / 2) + (jerk[i] - jp[i]) * (dt2 / 12);
+            x[i] = x[i] + (v[i] + oldv) * (dt / 2) + (a[i] - ap[i]) * (dt2 / 12);
+        }
+    }
+
+
+    double energy() {
+        // calculate potential + kinetic energy
+        int i, j;
+        double K = 0; // kinetic
+        double U = 0; // potential
+        for (i = 0; i < NBody; i++) {
+            double const Ki = (v[i] * v[i]) * (m[i] / 2);
+            K += Ki;
+            for (j = i+1; j < NBody; j++) {
+                V3 r = x[i] - x[j];
+                double const Uij = (m[i] * m[j]) / sqrt(r * r);
+                U -= Uij;
+            }
+        }
+        // remove the extra G (each mass is Gm)
+        return(K + U)/G;
+    }
+
+    static void test() {
+        System s;
+        s.init();
+#if 0
+        s.x[0] = V3({ 1, 0, 0 });
+        s.v[0] = V3({ 0, 0.1, 0.2 });
+        s.m[0] = 1;
+
+        s.x[1] = V3({ 0, 0, 0 });
+        s.v[1] = V3({ 0, 0, 0 });
+        s.m[1] = 1;
+
+        s.integrate(1);
+        s.integrate(1);
+#endif
+
+        double dt;
+        double t;
+
+        printf("E(t0)=%g\n", s.energy());
+        dt = 0.1;
+        int nsteps = 0;
+        for (t = 2440400.50; t <= 2440800.50; t += dt) {
+            nsteps++;
+            if (nsteps % 100 == 0)
+                printf("E(%d)=%g\n", nsteps, s.energy());
+            s.integrate(dt);
+        }
+        printf("E(t1)=%g\n", s.energy());
+
+    }
+
+};
+
+
 class Integrators {
 public:
     V3 pos, vel;
     double mass;
     double e0;
-    
+
     typedef void(Integrators::*integrate_func)(double dt);
 
     void init(double mass_, V3 pos_, V3 vel_) {
@@ -240,7 +416,7 @@ public:
         double t_dia = dt_dia - dt / 2;
         double t_out = dt_out - dt / 2;
         double t_end = dt_end - dt / 2;
-        
+
         __int64 t0 = now();
         while (time < t_end) {
             (this->*integrate)(dt);
@@ -261,8 +437,50 @@ public:
     V3 jerk() {
         double r2 = pos * pos;
         double r3 = r2 * sqrt(r2);
-        return (vel + pos * (-3 * (pos * vel)/r2)) * (-mass / r3);
+        return (vel + pos * (-3 * (pos * vel) / r2)) * (-mass / r3);
     }
+
+    void updateForce(const V3& x, const V3& v, V3& a, V3& j) {
+        double r2 = x * x;
+        double r3 = r2 * sqrt(r2);
+        a = x * (-mass / r3);
+        j = (v + x * (-3 * (x * v) / r2)) * (-mass / r3);
+    }
+
+
+    void hermite(double dt) {
+        V3 old_pos = pos;
+        V3 old_vel = vel;
+        V3 old_acc = acc();
+        V3 old_jerk = jerk();
+        double dt2 = dt * dt;
+        pos += vel * dt + old_acc * (dt2 / 2) + old_jerk * (dt2 * dt / 6);
+        vel += old_acc*dt + old_jerk * (dt2 / 2);
+        V3 new_acc = acc();
+        V3 new_jerk = jerk();
+        vel = old_vel + (old_acc + new_acc) * (dt / 2) + (old_jerk - new_jerk) * (dt2 / 12);
+        pos = old_pos + (old_vel + vel) * (dt / 2) + (old_acc - new_acc) * (dt2 / 12);
+    }
+
+    void hermiteRewrite(double dt) {
+        V3 a, j;
+        V3 ap, jp;
+        V3 xp, vp;
+        updateForce(pos, vel, a, j);
+
+        //prediction
+        double dt2 = dt * dt;
+        xp = pos + vel * dt + a * (dt2 / 2) + j * (dt2 * dt / 6);
+        vp = vel + a*dt + j * (dt2 / 2);        
+
+        updateForce(xp, vp, ap, jp);
+       
+        // correction
+        V3 oldv = vel;
+        vel = vel + (a + ap) * (dt / 2) + (j - jp) * (dt2 / 12);
+        pos = pos + (vel + oldv) * (dt / 2) + (a - ap) * (dt2 / 12);
+    }
+
 
     // 90 ticks. this is an optimized version of leapfrog()
     void leapfrog2(double dt) {
@@ -411,19 +629,7 @@ public:
         vel.z = vz;
     }
 
-    void hermite(double dt) {
-        V3 old_pos = pos;
-        V3 old_vel = vel;
-        V3 old_acc = acc();
-        V3 old_jerk = jerk();
-        double dt2 = dt * dt;
-        pos += vel * dt + old_acc * (dt2 / 2) + old_jerk * (dt2 * dt / 6);
-        vel += old_acc*dt + old_jerk * (dt2 / 2);
-        V3 new_acc = acc();
-        V3 new_jerk = jerk();
-        vel = old_vel + (old_acc + new_acc) * (dt / 2) + (old_jerk - new_jerk) * (dt2 / 12);
-        pos = old_pos + (old_vel + vel) * (dt / 2) + (old_acc - new_acc) * (dt2 / 12);
-    }
+
 
     void rk2(double dt) {
         V3 old_pos = pos;
@@ -468,8 +674,10 @@ public:
         b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
         printf("e0 = %g\n", b.e0);
         double min_dt = 0.000001;
+        b.evolve(1, 10, 12, 3, &Integrators::hermiteRewrite);
 
-#if 1
+
+#if 0
         printf("Forward:\n");
         for (double dt = 1; dt >= min_dt; dt *= 0.1) {
             b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
@@ -487,8 +695,6 @@ public:
             b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
             b.evolve(dt, 10, 100, 10, &Integrators::leapfrog2);
         }
-#endif
-
 
         printf("Hermite:\n");
         for (double dt = 1; dt >= min_dt; dt *= 0.1) {
@@ -496,14 +702,23 @@ public:
             b.evolve(dt, 10, 100, 10, &Integrators::hermite);
         }
 
+
+#endif
+
+        printf("Hermite rewrite:\n");
+        for (double dt = 1; dt >= min_dt; dt *= 0.1) {
+            b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+            b.evolve(dt, 10, 100, 10, &Integrators::hermiteRewrite);
+        }
+
+#if 0
+
         printf("hermitefast:\n");
         for (double dt = 1; dt >= min_dt; dt *= 0.1) {
             b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
             b.evolve(dt, 10, 100, 10, &Integrators::hermitefast);
         }
 
-
-#if 1
         printf("RK2:\n");
         for (double dt = 1; dt >= min_dt; dt *= 0.1) {
             b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
@@ -555,11 +770,18 @@ int _tmain(int argc, _TCHAR* argv[])
     printf("mercury dx=(%g %g %g)\n", mercury.x.x - ss.planets[1].x.x, mercury.x.y - ss.planets[1].x.y, mercury.x.z - ss.planets[1].x.z);
 
     scanf_s("%g", t);
+#else
+
+    Integrators b;
+    b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
+    printf("e0 = %g\n", b.e0);
+    b.evolve(1, 10, 12, 3, &Integrators::hermiteRewrite);
+
+    System::test();
+
+
+//    Integrators::test();
 #endif
-
-
-    Integrators::test();
-
 
     printf("Press a key to close.");
     getchar();

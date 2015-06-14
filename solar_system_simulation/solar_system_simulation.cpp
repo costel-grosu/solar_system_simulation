@@ -220,6 +220,8 @@ public:
 
 
 
+typedef enum { Sun, Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto } CelestialBody;
+
 class System {
 public:
     static const int NBody = 10;
@@ -231,63 +233,54 @@ public:
         //init with JPL data
         //2440400.50 JD0 Julian date of initial state vector
         const FLOAT T0 = 2440400.50;
-
-        /* Sun */
-        int i = 0;
+        CelestialBody i;
+        
+        i = Sun;
         x[i] = V3(4.5144118714356666407e-003, 7.2282841152065867346e-004, 2.4659100492567986271e-004);
         v[i] = V3(-2.8369446340813151639e-007, 5.1811944086463255444e-006, 2.2306588340621263489e-006);
         m[i] = 2.95912208285591102582E-4;
 
-        /* Mercury */
-        i = 1;
+        i = Mercury;
         x[i] = V3(3.6030663368975339466e-001, -9.4812876741771684223e-002, -8.7466840117233140436e-002);
         v[i] = V3(3.7085069798210382186e-003, 2.4854958767430945324e-002, 1.2929109014677844626e-002);
         m[i] = 4.91254745145081175785E-11;
 
-        /* Venus */
-        i = 2;
+        i = Venus;
         x[i] = V3(6.0786466491731583464e-001, -3.5518362463675619232e-001, -1.9824142909855515515e-001);
         v[i] = V3(1.1156645711264016669e-002, 1.5494075513638794325e-002, 6.2773904546696609267e-003);
         m[i] = 7.24345620963276523095E-10;
 
-        /* EMB */
-        i = 3;
+        i = Earth;
         x[i] = V3(1.0820747754938311664e-001, -9.2711110739430602933e-001, -4.0209347855944090112e-001);
         v[i] = V3(1.6833251020051496668e-002, 1.5602036176919105255e-003, 6.7646174015847273137e-004);
         m[i] = 8.88769273403302327042E-10;
 
-        /* Mars */
-        i = 4;
+        i = Mars;
         x[i] = V3(-1.2796408611369531836e-001, -1.3262618005333617013e+000, -6.0530808652523961512e-001);
         v[i] = V3(1.4481919298277924969e-002, 8.0528538390447499843e-005, -3.5188931029397090065e-004);
         m[i] = 9.54952894222405763492E-11;
 
-        /* Jupiter */
-        i = 5;
+        i = Jupiter;
         x[i] = V3(-5.3896824544609061333e+000, -7.7026549518616593034e-001, -1.9866431165907522014e-001);
         v[i] = V3(1.0053452569924098185e-003, -6.5298425191689416643e-003, -2.8258787532429609536e-003);
         m[i] = 2.82534210344592625472E-7;
 
-        /* Saturn */
-        i = 6;
+        i = Saturn;
         x[i] = V3(7.9527768530257360864e+000, 4.5078822184006553686e+000, 1.5201955253183338898e+000);
         v[i] = V3(-3.1594662504012930114e-003, 4.3714634278372622354e-003, 1.9441395169137103763e-003);
         m[i] = 8.45946850483065929285E-8;
 
-        /* Uranus */
-        i = 7;
+        i = Uranus;
         x[i] = V3(-1.8278236586353147533e+001, -9.5764572881482056433e-001, -1.6132190397271035415e-001);
         v[i] = V3(1.7108310564806817248e-004, -3.7646704682815900043e-003, -1.6519678610257000136e-003);
         m[i] = 1.28881623813803488851E-8;
 
-        /* Neptune */
-        i = 8;
+        i = Neptune;
         x[i] = V3(-1.6367191358770888335e+001, -2.3760896725373076342e+001, -9.3213866179497290101e+000);
         v[i] = V3(2.6225242764289213785e-003, -1.5277473123858904045e-003, -6.9183197562182804864e-004);
         m[i] = 1.53211248128427618918E-8;
 
-        /* Pluto */
-        i = 9;
+        i = Pluto;
         x[i] = V3(-3.0447680255169362534e+001, -5.3177934960261367037e-001, 9.0596584886274922101e+000);
         v[i] = V3(2.8177758090360373050e-004, -3.1469590804946202045e-003, -1.0794238049289112837e-003);
         m[i] = 2.27624775186369921644E-12;
@@ -298,7 +291,7 @@ public:
     void updateForces(V3* x, V3* v, V3* a, V3* jerk) {
         int i, j;
         V3 dx, dv, da, dj;
-        double r2, r3;
+        double r2, ir2, ir3;
         for (i = 0; i < NBody; i++) {
             a[i] = V3(0, 0, 0);
             jerk[i] = V3(0, 0, 0);
@@ -308,30 +301,82 @@ public:
             for (j = i+1; j < NBody; j++) {
                 dx = x[i] - x[j];
                 dv = v[i] - v[j];
-                r2 = dx * dx;
-                r3 = r2 * sqrt(r2);
-                dj = (dv + dx * (-3 * (dx * dv) / r2));
+                ir2 = 1 / (dx * dx);
+                ir3 = ir2 * sqrt(ir2);
+                
+                dj = (dv + dx * (-3 * (dx * dv) * ir2));
 
-                a[i] -= dx * (m[j] / r3); 
-                a[j] += da * (m[i] / r3);
-                jerk[i] -= dj * (m[j] / r3);
-                jerk[j] += dj * (m[i] / r3);
+                a[i] -= dx * (m[j] * ir3); 
+                a[j] += dx * (m[i] * ir3);
+                jerk[i] -= dj * (m[j] * ir3);
+                jerk[j] += dj * (m[i] * ir3);
             }
     }
+
+    // given x, v calculate a, jerk
+    void updateForcesFast(V3* x, V3* v, V3* a, V3* jerk) {
+        int i, j;
+        double dx, dy, dz, dvx, dvy, dvz, dax, day, daz, djx, djy, djz;
+        double r2, ir2, ir3;
+
+        for (i = 0; i < NBody; i++) {
+            a[i] = V3(0, 0, 0);
+            jerk[i] = V3(0, 0, 0);
+        }
+
+        for (i = 0; i < NBody; i++)
+            for (j = i + 1; j < NBody; j++) {
+                dx = x[i].x - x[j].x;
+                dy = x[i].y - x[j].y;
+                dz = x[i].z - x[j].z;
+                dvx = v[i].x - v[j].x;
+                dvy = v[i].y - v[j].y;
+                dvz = v[i].z - v[j].z;
+
+                ir2 = 1 / (dx * dx + dy * dy + dz * dz);
+                ir3 = ir2 * sqrt(ir2);
+                
+                double dxdv = dx * dvx + dy *dvy + dz * dvz;
+
+                djx = (dvx + dx * (-3 * dxdv * ir2));
+                djy = (dvy + dy * (-3 * dxdv * ir2));
+                djz = (dvz + dz * (-3 * dxdv * ir2));
+
+                double mir3 = m[i] * ir3; 
+                double mjr3 = m[j] * ir3;
+
+                a[i].x -= dx * mjr3;
+                a[i].y -= dy * mjr3;
+                a[i].z -= dz * mjr3;
+
+                a[j].x += dx * mir3;
+                a[j].y += dy * mir3;
+                a[j].z += dz * mir3;
+
+                jerk[i].x -= djx * mjr3;
+                jerk[i].y -= djy * mjr3;
+                jerk[i].z -= djz * mjr3;
+
+                jerk[j].x += djx * mir3;
+                jerk[j].y += djy * mir3;
+                jerk[j].z += djz * mir3;
+            }
+    }
+
 
 
     void integrate(double dt) {
         int i, j;
         double dt2 = dt * dt;
 
-        updateForces(x, v, a, jerk);
+        updateForcesFast(x, v, a, jerk);
 
         //prediction
         for (i = 0; i < NBody; i++) {
             xp[i] = x[i] + v[i] * dt + a[i] * (dt2 / 2) + jerk[i] * (dt2 * dt / 6);
             vp[i] = v[i] + a[i] * dt + jerk[i] * (dt2 / 2);
         }
-        updateForces(xp, vp, ap, jp);
+        updateForcesFast(xp, vp, ap, jp);
 
         // correction
         for (i = 0; i < NBody; i++) {
@@ -363,33 +408,64 @@ public:
     static void test() {
         System s;
         s.init();
-#if 0
-        s.x[0] = V3({ 1, 0, 0 });
-        s.v[0] = V3({ 0, 0.1, 0.2 });
-        s.m[0] = 1;
-
-        s.x[1] = V3({ 0, 0, 0 });
-        s.v[1] = V3({ 0, 0, 0 });
-        s.m[1] = 1;
-
-        s.integrate(1);
-        s.integrate(1);
-#endif
 
         double dt;
         double t;
 
-        printf("E(t0)=%g\n", s.energy());
+        { //for perf measurement
+            __int64 t0 = now();
+            for (int i = 0; i < 1000; i++) {
+                s.updateForces(s.x, s.v, s.a, s.jerk);
+            }
+            __int64 t1 = now();
+            printf("ticks for updateForce: %d\n", (int)((t1 - t0) / 1000));
+        }
+
+        { //for perf measurement
+            __int64 t0 = now();
+            for (int i = 0; i < 1000; i++) {
+                s.updateForcesFast(s.x, s.v, s.a, s.jerk);
+            }
+            __int64 t1 = now();
+            printf("ticks for updateForceFast: %d\n", (int)((t1 - t0) / 1000));
+        }
+
+
+        double e0 = s.energy();
+        printf("E(t0)=%g\n", e0);
         dt = 0.1;
         int nsteps = 0;
+        __int64 t0 = now();
         for (t = 2440400.50; t <= 2440800.50; t += dt) {
             nsteps++;
-            if (nsteps % 100 == 0)
-                printf("E(%d)=%g\n", nsteps, s.energy());
             s.integrate(dt);
         }
-        printf("E(t1)=%g\n", s.energy());
+        __int64 t1 = now();
+        printf("at %g after %d steps, relative delta Energy=%g\n", 
+            t, nsteps, (s.energy()-e0)/e0);
 
+        printf("ticks for loop: %d\n", (int)((t1 - t0) / nsteps));
+
+        { // check positional error
+            V3 xtest, vtest, dx, dv;
+            
+            // big error for Mercury, need general relativity
+            xtest = V3(3.6030663368975339466e-001, -9.4812876741771684223e-002, -8.7466840117233140436e-002);
+            vtest = V3(3.7085069798210382186e-003, 2.4854958767430945324e-002, 1.2929109014677844626e-002);
+            dx = s.x[Mercury] - xtest;
+            printf("mercury dx=(%g %g %g)\n", dx.x, dx.y, dx.z);
+            dv = s.v[Mercury] - vtest;
+            printf("mercury dv=(%g %g %g)\n", dv.x, dv.y, dv.z);
+
+            // very small error for Jupiter, newtonian aproximation works well
+            xtest = V3(-4.2373615722355993645e+000, -3.1464733091277224306e+000, -1.2462241659031373286e+000);
+            vtest = V3(4.6228653666202124358e-003, -5.0555918692615562352e-003, -2.2818455722493645242e-003);
+            dx = s.x[Jupiter] - xtest;
+            printf("jupiter dx=(%g %g %g)\n", dx.x, dx.y, dx.z);
+            dv = s.v[Jupiter] - vtest;
+            printf("Jupiter dv=(%g %g %g)\n", dv.x, dv.y, dv.z);
+
+        }
     }
 
 };
@@ -771,11 +847,6 @@ int _tmain(int argc, _TCHAR* argv[])
 
     scanf_s("%g", t);
 #else
-
-    Integrators b;
-    b.init(1, { 1, 0, 0 }, { 0, 0.1, 0.2 });
-    printf("e0 = %g\n", b.e0);
-    b.evolve(1, 10, 12, 3, &Integrators::hermiteRewrite);
 
     System::test();
 

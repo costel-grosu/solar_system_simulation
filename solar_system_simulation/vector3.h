@@ -4,14 +4,6 @@
 #include <cmath>
 #include <algorithm>
 
-#ifndef INLINE
-#ifdef __GNUC__
-#define INLINE __attribute__((always_inline))
-#else
-#define INLINE __forceinline
-#endif
-#endif
-
 template <typename REAL> 
 struct vector3{
 	REAL x, y, z;
@@ -60,7 +52,5 @@ struct vector3{
 
 typedef vector3<double> dvec3;
 typedef vector3<float>  fvec3;
-
-#undef INLINE
 
 #endif //  __VECTOR3_H

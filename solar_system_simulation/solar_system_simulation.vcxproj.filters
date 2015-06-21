@@ -27,12 +27,18 @@
     <ClInclude Include="vector3.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="BasicIntegrators.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Platform.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="solar_system_simulation.cpp">
+    <ClCompile Include="SolarSystemSimulation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -24,7 +24,7 @@ public:
     bool useRelativity;
 
     NBody(int n, bool useRelativity) {
-        n = 10;
+        this->n = n;
         x = new V3[n];
         v = new V3[n];
         a = new V3[n];
@@ -51,14 +51,14 @@ public:
         delete[] m_GR;
     }
 
-    static NBody* initSolarSystem() {
+    static NBody* initSolarSystem(bool useRelativity) {
         CelestialBody i;
         
         //init with JPL data
         //2440400.50 JD0 Julian date of initial state vector
         const FLOAT T0 = 2440400.50;
         
-        NBody* ss = new NBody(10, false);
+        NBody* ss = new NBody(10, useRelativity);
 
         i = Sun;
         ss->x[i] = V3(4.5144118714356666407e-003, 7.2282841152065867346e-004, 2.4659100492567986271e-004);
@@ -145,24 +145,43 @@ public:
 
     // update acceleration with relativity correction
     void relativity(V3* x, V3* v, V3* a) {
-        int i;
-        V3 t1, t2, t3;
-        double ic2 = 1 / (C * C);
-        for (i = 0; i < n; i++) {
-            if (i != Sun) {
-                V3 dx = x[Sun] - x[i];
-                double ir2 = 1/(dx * dx);
-                double ir = sqrt(ir2);
-                t1 = dx * (m[Sun] * ir2 * ir * ic2 * ((v[i] * v[i]) + 2 * (v[Sun] * v[Sun]) - 4 * (v[i] * v[Sun])));
-                t2 = (m[Sun] * ir2 * ir * ic2) * (-dx * (4 * x[i] - 3 * x[Sun]))*(v[i] - v[Sun]);
-                t3 = (7 * ic2 / 2 * ir * m[Sun]) * a[i];
-                a[i] += t1 + t2 + t3;
-            }
-        }
+        int i, j, k;
+        V3 t0, t1, t2, t3, t4;
+        double invc2 = 1 / (C * C);
 
+        for (i = 0; i < n; i++) {
+            for (j = 0; j < n; j++) 
+                if (i != j) {
+                    V3 r_ij = x[i] - x[j];
+                    double invr2_ij = 1 / (r_ij * r_ij);
+                    double invr_ij = sqrt(invr2_ij);
+                    V3 n_ij = r_ij * invr_ij;
+
+                    // post-newtonian formula from "Gravity  Newtonian, Post-newtonian, Relativistic" page 441
+                    V3 t0 = -m[j] * invr2_ij * n_ij; // newtonian acceleration
+                    t1 = t0 * (v[i]*v[i] - 4.f*(v[i]*v[j]) + 2.f*(v[j]*v[j]) - 3.f/2.f*(n_ij*v[j]) - 5.f*m[i]*invr_ij - 4.f*m[j]*invr_ij);
+                    t2 = -t0 * (n_ij*(4.f*v[i] - 3.f*v[j])) * (v[i] - v[j]);
+
+                    // t3,t4 seem to be 100 times smaller than t1, t2
+                    t3 = V3(0, 0, 0);
+                    t4 = V3(0, 0, 0);
+                    for (k = 0; k < n; k++)
+                        if (k != i && k != j) {
+                            V3 r_jk = x[j] - x[k];
+                            double invr2_jk = 1 / (r_jk * r_jk);
+                            double invr_jk = sqrt(invr2_jk);
+                            V3 n_jk = r_jk * invr_jk;
+
+                            t3 += m[j] * m[k] * invr2_ij * (4.f*invr_ij + invr_jk - invr2_jk / (2.f*invr_ij)*(n_ij*n_jk)) * n_ij;
+                            t4 -= 7.f / 2.f * m[j] * m[k] * invr2_jk * invr_ij * n_jk;
+                        }
+                    //a[i] += invc2 * (t1 + t2);
+                    a[i] += invc2 * (t1 + t2 + t3 + t4);
+                }
+        }
     }
 
-    // given x, v calculate a, jerk
+    // given x, v calculate acc, jerk
     void updateForcesFast(V3* x, V3* v, V3* a, V3* jerk) {
         int i, j;
         double dx, dy, dz, dvx, dvy, dvz, dax, day, daz, djx, djy, djz;
@@ -216,20 +235,19 @@ public:
         }
     }
 
-
-
+    //4th order hermite scheme
     void integrate(double dt) {
         int i, j;
         double dt2 = dt * dt;
 
-        updateForcesFast(x, v, a, jerk);
+        updateForces(x, v, a, jerk);
 
         //predictor
         for (i = 0; i < n; i++) {
             xp[i] = x[i] + v[i] * dt + a[i] * (dt2 / 2) + jerk[i] * (dt2 * dt / 6);
             vp[i] = v[i] + a[i] * dt + jerk[i] * (dt2 / 2);
         }
-        updateForcesFast(xp, vp, ap, jp);
+        updateForces(xp, vp, ap, jp);
 
         // corrector
         for (i = 0; i < n; i++) {
@@ -259,8 +277,8 @@ public:
     }
 
 
-    // constrain the barycenter to stay at the origin
-    void barycenter_fixsun() {
+    // constrain the barycenter to stay at the origin, move the sun.
+    void barycenterFixsun() {
         int i, j, k;
         double ic2 = 1 / (C * C);
         for (k = 0; k < 2; k++) {
@@ -270,7 +288,7 @@ public:
                     V3 dx = x[i] - x[j];
                     s -= m[j] / sqrt(dx * dx);
                 }
-                m_GR[i] = m[i] * (1 + (v[i] * v[i]) * ic2 / 2 + s * ic2);
+                m_GR[i] = m[i] * (1 + ((v[i] * v[i]) * 0.5 + s) * ic2);
             }
 
             V3 cx = V3(0, 0, 0);
@@ -288,7 +306,7 @@ public:
     }
 
     static void testSolarSystem() {
-        NBody * ss = NBody::initSolarSystem();
+        NBody * ss = NBody::initSolarSystem(true);
         double dt;
         double t;
 #if 0
@@ -313,16 +331,16 @@ public:
 
         double e0 = ss->energy();
         printf("E(t0)=%g\n", e0);
-        dt = 0.01;
+        dt = 0.1;
         int nsteps = 0;
-        //s.barycenter_fixsun();
+        //ss->barycenterFixsun();
         __int64 t0 = now();
         for (t = 2440400.50; t <= 2440800.50; t += dt) {
             nsteps++;
             ss->integrate(dt);
         }
         __int64 t1 = now();
-        //s.barycenter_fixsun();
+        //s->barycenterFixsun();
 
         printf("at %g after %d steps, relative delta Energy=%g\n", 
             t, nsteps, (ss->energy()-e0)/e0);
@@ -331,8 +349,9 @@ public:
 
         { // check positional error
             V3 xtest, vtest, dx, dv;
-            
-            // big error for Mercury, need general relativity
+            // test data at 2440800.50
+
+            // some error for Mercury, need general relativity
             xtest = V3(-3.4350297408563828055e-001, -2.5118910315168408963e-001, -9.9170891227838064646e-002);
             vtest = V3(1.1640059959070938016e-002, -1.7964875644231269124e-002, -1.0817311005210173814e-002);
             dx = ss->x[Mercury] - xtest;
@@ -340,20 +359,17 @@ public:
             dv = ss->v[Mercury] - vtest;
             printf("mercury dv=(%g %g %g)\n", dv.x, dv.y, dv.z);
 
-            // very small error for Jupiter, newtonian aproximation works well
+            // smaller error for Jupiter
             xtest = V3(-4.2373615722355993645e+000, -3.1464733091277224306e+000, -1.2462241659031373286e+000);
             vtest = V3(4.6228653666202124358e-003, -5.0555918692615562352e-003, -2.2818455722493645242e-003);
             dx = ss->x[Jupiter] - xtest;
             printf("jupiter dx=(%g %g %g)\n", dx.x, dx.y, dx.z);
             dv = ss->v[Jupiter] - vtest;
             printf("Jupiter dv=(%g %g %g)\n", dv.x, dv.y, dv.z);
-
         }
     }
 
 };
-
-
 
 
 
@@ -370,109 +386,3 @@ int _tmain(int argc, _TCHAR* argv[])
 	return 0;
 }
 
-/*
-relativity code
-
-v2j[j] = V[j] * V[j] / c2
-
-for i = all planets:
-    a[i] = (0,0,0)
-
-    rci = 0
-    for k = all bodies:
-        rci += m[k] / |rik|
-
-    XS = (0, 0, 0)
-    for j = all bodies
-        XD = X[j] - X[i]
-
-        rc = -4 * rci / c2
-        
-        s = sum_k(m[k] / |rjk|)
-
-        rc -= s / c2
-
-        rc += v2j[i]
-
-        rc += 2 * v2j[j]
-        
-        rc -= -4 / c2 * (V[i] * V[j]) 
-
-        s = (-XD * V[j]) / |r|
-        rc -= 3/2 / c2 * s * s
-
-        s = XD * newton_acc[j]
-
-        rc += 1/2 / c2 * s
-
-        XS += XD * rc * m[j] / r3ij
-
-        s = - XD * (4*V[i] - 3 * V[j]) * m[j] / (r3ij * c2)
-
-        XS += s * (V[i] - V[j])
-
-        temp  = 7/2 / c2 * m[j] / |rij|
-        XS += temp * newton_acc[j]
-
-    acc = XS
-
-
-
-    A[i] +=  Rij * m[j] / r3ij * ( 1/2*(R*NA[j])/c2 + 3/2*(R*V[j])/r + 4*(V[i]*V[j])/c2 - sum_k(m[k]/rjk)/c2 -4*sum_k(m[k]/rik)/c2  + (V[i]*V[i])/c2 + 2*(V[j]*V[j])/c2 )
-
-    A[i] += NA[j] * 7/2 * 1/c2 * m[j]/rij 
-
-    A[i] += (V[j]-V[i]) * (XD * (4*V[i] - 3 * V[j]) * m[j] / (r3ij * c2))
-
-
-    
-    from the article:
-
-    A[i] = Rij * m[j] / r3ij * (1 - 1/c2 * (4*sum_k(m[k]/rik) -sum_k(m[k]/rjk)  + ((V[i].V[i]) + 2*(V[j].V[j]) - 4*(V[i].V[j]))      ) )  
-
-
-
-
-
-newton output:
-v[6] is: 0, 2, 4 = acc    1,3,5 = speed
-
-yw are positions
-distances(yw)
-
-position of body j
-xv = y[jj+1];
-yv = y[jj+3];
-zv = y[jj+5];
-
-position of body i:
-ii = 6*FMASS;
-y[ii+1]
-y[ii+3]
-y[ii+5]
-
-
-acceleration:
-xv = yw[ii+1];
-yv = yw[ii+3];
-zv = yw[ii+5];
-
-xd = yw[jj+1] - xv;
-yd = yw[jj+3] - yv;
-zd = yw[jj+5] - zv;
-
-output of newton:
-v[ii] = acc
-v[ii+2] = acc
-v[ii+4] = acc
-
-v[ii+1] = vel
-v[ii+3] = vel
-v[ii+5] = vel
-
-
-
-
-
-
-*/
